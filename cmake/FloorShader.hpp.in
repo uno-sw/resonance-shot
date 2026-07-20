@@ -1,0 +1,5 @@
+#pragma once
+
+#include <string_view>
+
+inline constexpr std::string_view floor_shader_source = R"metal(@FLOOR_SHADER_SOURCE@)metal";

@@ -24,13 +24,13 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET
 
 include(cmake/Dependencies.cmake)
 
-set(TRIANGLE_SHADER_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/Triangle.metal")
+set(FLOOR_SHADER_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/Floor.metal")
 set_property(
   DIRECTORY
   APPEND
-  PROPERTY CMAKE_CONFIGURE_DEPENDS "${TRIANGLE_SHADER_FILE}")
-file(READ "${TRIANGLE_SHADER_FILE}" TRIANGLE_SHADER_SOURCE)
-configure_file(cmake/TriangleShader.hpp.in generated/TriangleShader.hpp @ONLY)
+  PROPERTY CMAKE_CONFIGURE_DEPENDS "${FLOOR_SHADER_FILE}")
+file(READ "${FLOOR_SHADER_FILE}" FLOOR_SHADER_SOURCE)
+configure_file(cmake/FloorShader.hpp.in generated/FloorShader.hpp @ONLY)
 
 add_executable(resonance_shot Source/GpuWindow.cpp Source/SdlRuntime.cpp Source/main.cpp)
 target_include_directories(resonance_shot PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -42,9 +42,9 @@ include(CTest)
 if(BUILD_TESTING)
   find_program(XCRUN_EXECUTABLE xcrun REQUIRED)
   add_test(
-    NAME resonance_shot_compiles_triangle_shader
+    NAME resonance_shot_compiles_floor_shader
     COMMAND
       "${XCRUN_EXECUTABLE}" metal
-      "-fmodules-cache-path=${CMAKE_CURRENT_BINARY_DIR}/MetalModuleCache" -c
-      "${TRIANGLE_SHADER_FILE}" -o "${CMAKE_CURRENT_BINARY_DIR}/Triangle.air")
+      "-fmodules-cache-path=${CMAKE_CURRENT_BINARY_DIR}/MetalModuleCache" -c "${FLOOR_SHADER_FILE}"
+      -o "${CMAKE_CURRENT_BINARY_DIR}/Floor.air")
 endif()
