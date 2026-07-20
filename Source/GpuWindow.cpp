@@ -19,6 +19,12 @@ struct alignas(16) CameraUniforms {
     std::array<float, 16> view_projection;
 };
 
+struct alignas(16) LightingUniforms {
+    std::array<float, 4> direction;
+    std::array<float, 4> directional_color;
+    std::array<float, 4> ambient_color;
+};
+
 struct FloorVertex {
     std::array<float, 3> position;
     std::array<float, 3> normal;
@@ -38,6 +44,8 @@ constexpr std::array<FloorVertex, 6> floor_vertices{{
 
 static_assert(sizeof(CameraUniforms) == 64);
 static_assert(alignof(CameraUniforms) == 16);
+static_assert(sizeof(LightingUniforms) == 48);
+static_assert(alignof(LightingUniforms) == 16);
 
 CameraUniforms create_camera_uniforms(float aspect_ratio) {
     constexpr float pi = 3.14159265358979323846F;
@@ -47,6 +55,17 @@ CameraUniforms create_camera_uniforms(float aspect_ratio) {
     const resonance::math::Matrix4 projection =
         resonance::math::perspective(pi / 3.0F, aspect_ratio, 0.1F, 100.0F);
     return {.view_projection = resonance::math::multiply(projection, view).elements};
+}
+
+LightingUniforms create_lighting_uniforms(const SceneLighting &lighting) {
+    return {
+        .direction = {lighting.directional.direction.x, lighting.directional.direction.y,
+                      lighting.directional.direction.z, 0.0F},
+        .directional_color = {lighting.directional.color.red, lighting.directional.color.green,
+                              lighting.directional.color.blue, 0.0F},
+        .ambient_color = {lighting.ambient.color.red, lighting.ambient.color.green,
+                          lighting.ambient.color.blue, 0.0F},
+    };
 }
 
 [[noreturn]] void sdl_fail(const std::string &message) {
@@ -140,7 +159,7 @@ GpuShader create_shader(SDL_GPUDevice *device, SDL_GPUShaderStage stage, const c
         .entrypoint = entrypoint,
         .format = SDL_GPU_SHADERFORMAT_MSL,
         .stage = stage,
-        .num_uniform_buffers = stage == SDL_GPU_SHADERSTAGE_VERTEX ? 1U : 0U,
+        .num_uniform_buffers = 1,
     };
 
     GpuShader shader{SDL_CreateGPUShader(device, &create_info), ShaderDeleter{device}};
@@ -313,7 +332,7 @@ class GpuWindow::Impl {
         }
     }
 
-    void render(Color clear_color) {
+    void render(Color clear_color, const SceneLighting &lighting) {
         SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(device_.get());
         if (commands == nullptr) {
             sdl_fail("could not acquire GPU command buffer");
@@ -337,6 +356,8 @@ class GpuWindow::Impl {
         ensure_depth_texture(swapchain_width, swapchain_height);
 
         SDL_PushGPUVertexUniformData(commands, 0, &camera_uniforms_, sizeof(camera_uniforms_));
+        const LightingUniforms lighting_uniforms = create_lighting_uniforms(lighting);
+        SDL_PushGPUFragmentUniformData(commands, 0, &lighting_uniforms, sizeof(lighting_uniforms));
 
         SDL_GPUColorTargetInfo color_target{};
         color_target.texture = swapchain_texture;
@@ -426,4 +447,6 @@ GpuWindow::GpuWindow() : impl_(std::make_unique<Impl>()) {}
 
 GpuWindow::~GpuWindow() = default;
 
-void GpuWindow::render(Color clear_color) { impl_->render(clear_color); }
+void GpuWindow::render(Color clear_color, const SceneLighting &lighting) {
+    impl_->render(clear_color, lighting);
+}
