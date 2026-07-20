@@ -22,7 +22,11 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET
     "26.0"
     CACHE STRING "Minimum macOS version")
 
+include(cmake/Dependencies.cmake)
+
 add_executable(resonance_shot Source/main.cpp)
+target_link_libraries(resonance_shot PRIVATE SDL3::SDL3)
+target_compile_definitions(resonance_shot PRIVATE RESONANCE_VERSION="${PROJECT_VERSION}")
 target_compile_options(resonance_shot PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 include(CTest)
