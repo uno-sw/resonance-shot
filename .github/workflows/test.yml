@@ -44,6 +44,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore CMake build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build
+          key: >-
+            cmake-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('CMakeLists.txt', 'cmake/**/*.cmake') }}
+
       - name: Configure
         run: cmake -S . -B build -DBUILD_TESTING=ON
 
