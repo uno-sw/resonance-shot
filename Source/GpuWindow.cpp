@@ -131,6 +131,8 @@ struct TextureDeleter {
 using GpuTexture = std::unique_ptr<SDL_GPUTexture, TextureDeleter>;
 
 constexpr SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+// Floor.metal と同期すること: 縦方向9分割、周方向24分割、
+// 四角形1面あたり三角形2枚（6頂点）。
 constexpr std::uint32_t capsule_vertex_count = 9U * 24U * 6U;
 #ifdef NDEBUG
 constexpr bool gpu_debug_mode = false;
