@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <stdexcept>
 #include <string_view>
 
 namespace {
@@ -61,6 +62,11 @@ TEST_CASE("Vector operations", "[math][vector]") {
                  {.x = 0.6F, .y = 0.8F, .z = 0.0F}, "normalized vector");
 }
 
+TEST_CASE("Zero-length vectors cannot be normalized", "[math][vector]") {
+    CHECK_THROWS_AS(resonance::math::normalize({.x = 0.0F, .y = 0.0F, .z = 0.0F}),
+                    std::domain_error);
+}
+
 TEST_CASE("Matrix storage and multiplication", "[math][matrix]") {
     resonance::math::Matrix4 storage;
     storage.at(2, 1) = 42.0F;
@@ -106,4 +112,15 @@ TEST_CASE("View and projection matrices", "[math][camera]") {
                  {0.5F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F,
                   0.0F, 0.0F, -1.1F, -1.1F, 0.0F, 0.0F, -1.0F, 0.0F},
                  "perspective matrix");
+}
+
+TEST_CASE("Invalid view inputs are rejected", "[math][camera]") {
+    CHECK_THROWS_AS(resonance::math::look_at({.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                                             {.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                                             {.x = 0.0F, .y = 1.0F, .z = 0.0F}),
+                    std::domain_error);
+    CHECK_THROWS_AS(resonance::math::look_at({.x = 0.0F, .y = 0.0F, .z = 1.0F},
+                                             {.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                                             {.x = 0.0F, .y = 0.0F, .z = 1.0F}),
+                    std::domain_error);
 }

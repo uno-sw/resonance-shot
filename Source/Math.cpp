@@ -1,6 +1,7 @@
 #include "Math.hpp"
 
 #include <cmath>
+#include <stdexcept>
 
 namespace resonance::math {
 
@@ -21,7 +22,12 @@ Vector3 cross(Vector3 left, Vector3 right) {
 }
 
 Vector3 normalize(Vector3 vector) {
-    const float inverse_length = 1.0F / std::sqrt(dot(vector, vector));
+    const float length_squared = dot(vector, vector);
+    if (length_squared <= 0.0F) {
+        throw std::domain_error("cannot normalize a zero-length vector");
+    }
+
+    const float inverse_length = 1.0F / std::sqrt(length_squared);
     return {
         .x = vector.x * inverse_length,
         .y = vector.y * inverse_length,
