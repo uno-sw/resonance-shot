@@ -5,7 +5,9 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -16,6 +18,23 @@ namespace {
 struct alignas(16) CameraUniforms {
     std::array<float, 16> view_projection;
 };
+
+struct FloorVertex {
+    std::array<float, 3> position;
+    std::array<float, 3> normal;
+    std::array<float, 4> color;
+};
+
+static_assert(sizeof(FloorVertex) == 40);
+
+constexpr std::array<FloorVertex, 6> floor_vertices{{
+    {{-12.0F, 0.0F, -15.0F}, {0.0F, 1.0F, 0.0F}, {0.72F, 0.72F, 0.72F, 1.0F}},
+    {{-12.0F, 0.0F, 5.0F}, {0.0F, 1.0F, 0.0F}, {0.72F, 0.72F, 0.72F, 1.0F}},
+    {{12.0F, 0.0F, 5.0F}, {0.0F, 1.0F, 0.0F}, {0.72F, 0.72F, 0.72F, 1.0F}},
+    {{-12.0F, 0.0F, -15.0F}, {0.0F, 1.0F, 0.0F}, {0.72F, 0.72F, 0.72F, 1.0F}},
+    {{12.0F, 0.0F, 5.0F}, {0.0F, 1.0F, 0.0F}, {0.72F, 0.72F, 0.72F, 1.0F}},
+    {{12.0F, 0.0F, -15.0F}, {0.0F, 1.0F, 0.0F}, {0.72F, 0.72F, 0.72F, 1.0F}},
+}};
 
 static_assert(sizeof(CameraUniforms) == 64);
 static_assert(alignof(CameraUniforms) == 16);
@@ -63,6 +82,24 @@ struct GraphicsPipelineDeleter {
 };
 
 using GraphicsPipeline = std::unique_ptr<SDL_GPUGraphicsPipeline, GraphicsPipelineDeleter>;
+
+struct BufferDeleter {
+    SDL_GPUDevice *device;
+
+    void operator()(SDL_GPUBuffer *buffer) const noexcept { SDL_ReleaseGPUBuffer(device, buffer); }
+};
+
+using GpuBuffer = std::unique_ptr<SDL_GPUBuffer, BufferDeleter>;
+
+struct TransferBufferDeleter {
+    SDL_GPUDevice *device;
+
+    void operator()(SDL_GPUTransferBuffer *buffer) const noexcept {
+        SDL_ReleaseGPUTransferBuffer(device, buffer);
+    }
+};
+
+using GpuTransferBuffer = std::unique_ptr<SDL_GPUTransferBuffer, TransferBufferDeleter>;
 
 struct TextureDeleter {
     SDL_GPUDevice *device;
@@ -115,7 +152,8 @@ GpuShader create_shader(SDL_GPUDevice *device, SDL_GPUShaderStage stage, const c
 
 GraphicsPipeline create_graphics_pipeline(SDL_GPUDevice *device, SDL_Window *window,
                                           const char *vertex_entrypoint,
-                                          const char *fragment_entrypoint) {
+                                          const char *fragment_entrypoint,
+                                          bool uses_floor_vertices) {
     GpuShader vertex_shader = create_shader(device, SDL_GPU_SHADERSTAGE_VERTEX, vertex_entrypoint);
     GpuShader fragment_shader =
         create_shader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, fragment_entrypoint);
@@ -123,9 +161,35 @@ GraphicsPipeline create_graphics_pipeline(SDL_GPUDevice *device, SDL_Window *win
     const SDL_GPUColorTargetDescription color_target{
         .format = SDL_GetGPUSwapchainTextureFormat(device, window),
     };
+    const SDL_GPUVertexBufferDescription floor_vertex_buffer_description{
+        .slot = 0,
+        .pitch = sizeof(FloorVertex),
+        .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
+    };
+    const std::array<SDL_GPUVertexAttribute, 3> floor_vertex_attributes{{
+        {.location = 0,
+         .buffer_slot = 0,
+         .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
+         .offset = offsetof(FloorVertex, position)},
+        {.location = 1,
+         .buffer_slot = 0,
+         .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
+         .offset = offsetof(FloorVertex, normal)},
+        {.location = 2,
+         .buffer_slot = 0,
+         .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
+         .offset = offsetof(FloorVertex, color)},
+    }};
+    const SDL_GPUVertexInputState floor_vertex_input{
+        .vertex_buffer_descriptions = &floor_vertex_buffer_description,
+        .num_vertex_buffers = 1,
+        .vertex_attributes = floor_vertex_attributes.data(),
+        .num_vertex_attributes = floor_vertex_attributes.size(),
+    };
     const SDL_GPUGraphicsPipelineCreateInfo create_info{
         .vertex_shader = vertex_shader.get(),
         .fragment_shader = fragment_shader.get(),
+        .vertex_input_state = uses_floor_vertices ? floor_vertex_input : SDL_GPUVertexInputState{},
         .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
         .depth_stencil_state =
             {
@@ -149,6 +213,63 @@ GraphicsPipeline create_graphics_pipeline(SDL_GPUDevice *device, SDL_Window *win
         sdl_fail(std::string("could not create ") + vertex_entrypoint + " graphics pipeline");
     }
     return pipeline;
+}
+
+GpuBuffer create_floor_vertex_buffer(SDL_GPUDevice *device) {
+    const SDL_GPUBufferCreateInfo buffer_create_info{
+        .usage = SDL_GPU_BUFFERUSAGE_VERTEX,
+        .size = sizeof(floor_vertices),
+    };
+    GpuBuffer vertex_buffer{SDL_CreateGPUBuffer(device, &buffer_create_info),
+                            BufferDeleter{device}};
+    if (vertex_buffer == nullptr) {
+        sdl_fail("could not create floor vertex buffer");
+    }
+
+    const SDL_GPUTransferBufferCreateInfo transfer_create_info{
+        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = sizeof(floor_vertices),
+    };
+    GpuTransferBuffer transfer_buffer{SDL_CreateGPUTransferBuffer(device, &transfer_create_info),
+                                      TransferBufferDeleter{device}};
+    if (transfer_buffer == nullptr) {
+        sdl_fail("could not create floor transfer buffer");
+    }
+
+    void *mapped = SDL_MapGPUTransferBuffer(device, transfer_buffer.get(), false);
+    if (mapped == nullptr) {
+        sdl_fail("could not map floor transfer buffer");
+    }
+    std::memcpy(mapped, floor_vertices.data(), sizeof(floor_vertices));
+    SDL_UnmapGPUTransferBuffer(device, transfer_buffer.get());
+
+    SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(device);
+    if (commands == nullptr) {
+        sdl_fail("could not acquire floor upload command buffer");
+    }
+    SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(commands);
+    if (copy_pass == nullptr) {
+        const std::string error = SDL_GetError();
+        SDL_CancelGPUCommandBuffer(commands);
+        throw std::runtime_error("could not begin floor upload copy pass: " + error);
+    }
+
+    const SDL_GPUTransferBufferLocation source{
+        .transfer_buffer = transfer_buffer.get(),
+        .offset = 0,
+    };
+    const SDL_GPUBufferRegion destination{
+        .buffer = vertex_buffer.get(),
+        .offset = 0,
+        .size = sizeof(floor_vertices),
+    };
+    SDL_UploadToGPUBuffer(copy_pass, &source, &destination, false);
+    SDL_EndGPUCopyPass(copy_pass);
+    if (!SDL_SubmitGPUCommandBuffer(commands)) {
+        sdl_fail("could not submit floor upload command buffer");
+    }
+
+    return vertex_buffer;
 }
 
 class ClaimedGpuWindow {
@@ -180,9 +301,10 @@ class GpuWindow::Impl {
         : device_(create_gpu_device()), window_(create_window()),
           claim_(device_.get(), window_.get()),
           floor_pipeline_(create_graphics_pipeline(device_.get(), window_.get(), "floor_vertex",
-                                                   "floor_fragment")),
+                                                   "floor_fragment", true)),
           capsule_pipeline_(create_graphics_pipeline(device_.get(), window_.get(), "capsule_vertex",
-                                                     "capsule_fragment")),
+                                                     "capsule_fragment", false)),
+          floor_vertex_buffer_(create_floor_vertex_buffer(device_.get())),
           depth_texture_(nullptr, TextureDeleter{device_.get()}),
           camera_uniforms_(create_camera_uniforms(16.0F / 9.0F)) {
         if (!SDL_GPUTextureSupportsFormat(device_.get(), depth_format, SDL_GPU_TEXTURETYPE_2D,
@@ -244,6 +366,11 @@ class GpuWindow::Impl {
         }
 
         SDL_BindGPUGraphicsPipeline(render_pass, floor_pipeline_.get());
+        const SDL_GPUBufferBinding floor_vertex_binding{
+            .buffer = floor_vertex_buffer_.get(),
+            .offset = 0,
+        };
+        SDL_BindGPUVertexBuffers(render_pass, 0, &floor_vertex_binding, 1);
         SDL_DrawGPUPrimitives(render_pass, 6, 1, 0, 0);
         SDL_BindGPUGraphicsPipeline(render_pass, capsule_pipeline_.get());
         SDL_DrawGPUPrimitives(render_pass, capsule_vertex_count, 1, 0, 0);
@@ -288,6 +415,7 @@ class GpuWindow::Impl {
     ClaimedGpuWindow claim_;
     GraphicsPipeline floor_pipeline_;
     GraphicsPipeline capsule_pipeline_;
+    GpuBuffer floor_vertex_buffer_;
     GpuTexture depth_texture_;
     std::uint32_t depth_width_ = 0;
     std::uint32_t depth_height_ = 0;
