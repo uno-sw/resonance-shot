@@ -24,3 +24,10 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET
 
 add_executable(resonance_shot Source/main.cpp)
 target_compile_options(resonance_shot PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_test(NAME resonance_shot_prints_greeting COMMAND resonance_shot)
+  set_tests_properties(resonance_shot_prints_greeting PROPERTIES PASS_REGULAR_EXPRESSION
+                                                                 "Hello World" TIMEOUT 5)
+endif()
