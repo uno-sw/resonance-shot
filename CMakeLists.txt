@@ -32,14 +32,23 @@ set_property(
 file(READ "${FLOOR_SHADER_FILE}" FLOOR_SHADER_SOURCE)
 configure_file(cmake/FloorShader.hpp.in generated/FloorShader.hpp @ONLY)
 
+add_library(resonance_math STATIC Source/Math.cpp)
+target_include_directories(resonance_math PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+target_compile_options(resonance_math PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
 add_executable(resonance_shot Source/GpuWindow.cpp Source/SdlRuntime.cpp Source/main.cpp)
 target_include_directories(resonance_shot PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(resonance_shot PRIVATE SDL3::SDL3)
+target_link_libraries(resonance_shot PRIVATE resonance_math SDL3::SDL3)
 target_compile_definitions(resonance_shot PRIVATE RESONANCE_VERSION="${PROJECT_VERSION}")
 target_compile_options(resonance_shot PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(resonance_math_tests Tests/MathTests.cpp)
+  target_link_libraries(resonance_math_tests PRIVATE resonance_math)
+  target_compile_options(resonance_math_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME resonance_math_tests COMMAND resonance_math_tests)
+
   find_program(XCRUN_EXECUTABLE xcrun REQUIRED)
   add_test(
     NAME resonance_shot_compiles_floor_shader
