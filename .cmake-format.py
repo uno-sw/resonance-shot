@@ -1,0 +1,4 @@
+with section("format"):
+    line_width = 100
+    tab_size = 2
+    autosort = False

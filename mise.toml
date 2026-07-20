@@ -1,0 +1,14 @@
+[tools]
+"pipx:clang-format" = "21.1.8"
+"pipx:cmakelang" = "0.6.13"
+
+[settings]
+lockfile = true
+
+[tasks.format]
+description = "Format C++, Metal, and CMake sources"
+run = "./scripts/format"
+
+[tasks."format:check"]
+description = "Check C++, Metal, and CMake formatting"
+run = "./scripts/format --check"
