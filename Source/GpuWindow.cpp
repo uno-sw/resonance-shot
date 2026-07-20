@@ -132,9 +132,14 @@ using GpuTexture = std::unique_ptr<SDL_GPUTexture, TextureDeleter>;
 
 constexpr SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 constexpr std::uint32_t capsule_vertex_count = 9U * 24U * 6U;
+#ifdef NDEBUG
+constexpr bool gpu_debug_mode = false;
+#else
+constexpr bool gpu_debug_mode = true;
+#endif
 
 GpuDevice create_gpu_device() {
-    GpuDevice device{SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, true, "metal")};
+    GpuDevice device{SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, gpu_debug_mode, "metal")};
     if (device == nullptr) {
         sdl_fail("could not create Metal GPU device");
     }
