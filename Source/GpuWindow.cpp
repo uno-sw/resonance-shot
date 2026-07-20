@@ -331,8 +331,7 @@ class GpuWindow::Impl {
           capsule_pipeline_(create_graphics_pipeline(device_.get(), window_.get(), "capsule_vertex",
                                                      "capsule_fragment", false)),
           floor_vertex_buffer_(create_floor_vertex_buffer(device_.get())),
-          depth_texture_(nullptr, TextureDeleter{device_.get()}),
-          camera_uniforms_(create_camera_uniforms(16.0F / 9.0F)) {
+          depth_texture_(nullptr, TextureDeleter{device_.get()}) {
         if (!SDL_GPUTextureSupportsFormat(device_.get(), depth_format, SDL_GPU_TEXTURETYPE_2D,
                                           SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
             throw std::runtime_error("Metal GPU does not support the required D32 depth format");
@@ -447,7 +446,7 @@ class GpuWindow::Impl {
     GpuTexture depth_texture_;
     std::uint32_t depth_width_ = 0;
     std::uint32_t depth_height_ = 0;
-    CameraUniforms camera_uniforms_;
+    CameraUniforms camera_uniforms_{};
 };
 
 GpuWindow::GpuWindow() : impl_(std::make_unique<Impl>()) {}
