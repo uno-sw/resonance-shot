@@ -24,14 +24,27 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET
 
 include(cmake/Dependencies.cmake)
 
+set(TRIANGLE_SHADER_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/Triangle.metal")
+set_property(
+  DIRECTORY
+  APPEND
+  PROPERTY CMAKE_CONFIGURE_DEPENDS "${TRIANGLE_SHADER_FILE}")
+file(READ "${TRIANGLE_SHADER_FILE}" TRIANGLE_SHADER_SOURCE)
+configure_file(cmake/TriangleShader.hpp.in generated/TriangleShader.hpp @ONLY)
+
 add_executable(resonance_shot Source/GpuWindow.cpp Source/SdlRuntime.cpp Source/main.cpp)
+target_include_directories(resonance_shot PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(resonance_shot PRIVATE SDL3::SDL3)
 target_compile_definitions(resonance_shot PRIVATE RESONANCE_VERSION="${PROJECT_VERSION}")
 target_compile_options(resonance_shot PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 include(CTest)
 if(BUILD_TESTING)
-  add_test(NAME resonance_shot_prints_greeting COMMAND resonance_shot)
-  set_tests_properties(resonance_shot_prints_greeting PROPERTIES PASS_REGULAR_EXPRESSION
-                                                                 "Hello World" TIMEOUT 5)
+  find_program(XCRUN_EXECUTABLE xcrun REQUIRED)
+  add_test(
+    NAME resonance_shot_compiles_triangle_shader
+    COMMAND
+      "${XCRUN_EXECUTABLE}" metal
+      "-fmodules-cache-path=${CMAKE_CURRENT_BINARY_DIR}/MetalModuleCache" -c
+      "${TRIANGLE_SHADER_FILE}" -o "${CMAKE_CURRENT_BINARY_DIR}/Triangle.air")
 endif()

@@ -1,7 +1,9 @@
 #include "GpuWindow.hpp"
+#include "TriangleShader.hpp"
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -25,6 +27,24 @@ struct GpuDeviceDeleter {
 
 using GpuDevice = std::unique_ptr<SDL_GPUDevice, GpuDeviceDeleter>;
 
+struct ShaderDeleter {
+    SDL_GPUDevice *device;
+
+    void operator()(SDL_GPUShader *shader) const noexcept { SDL_ReleaseGPUShader(device, shader); }
+};
+
+using GpuShader = std::unique_ptr<SDL_GPUShader, ShaderDeleter>;
+
+struct GraphicsPipelineDeleter {
+    SDL_GPUDevice *device;
+
+    void operator()(SDL_GPUGraphicsPipeline *pipeline) const noexcept {
+        SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+    }
+};
+
+using GraphicsPipeline = std::unique_ptr<SDL_GPUGraphicsPipeline, GraphicsPipelineDeleter>;
+
 GpuDevice create_gpu_device() {
     GpuDevice device{SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, true, "metal")};
     if (device == nullptr) {
@@ -42,6 +62,50 @@ Window create_window() {
         sdl_fail("could not create window");
     }
     return window;
+}
+
+GpuShader create_shader(SDL_GPUDevice *device, SDL_GPUShaderStage stage, const char *entrypoint) {
+    const SDL_GPUShaderCreateInfo create_info{
+        .code_size = triangle_shader_source.size(),
+        .code = reinterpret_cast<const std::uint8_t *>(triangle_shader_source.data()),
+        .entrypoint = entrypoint,
+        .format = SDL_GPU_SHADERFORMAT_MSL,
+        .stage = stage,
+    };
+
+    GpuShader shader{SDL_CreateGPUShader(device, &create_info), ShaderDeleter{device}};
+    if (shader == nullptr) {
+        sdl_fail(std::string("could not create ") + entrypoint + " shader");
+    }
+    return shader;
+}
+
+GraphicsPipeline create_graphics_pipeline(SDL_GPUDevice *device, SDL_Window *window) {
+    GpuShader vertex_shader = create_shader(device, SDL_GPU_SHADERSTAGE_VERTEX, "triangle_vertex");
+    GpuShader fragment_shader =
+        create_shader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "triangle_fragment");
+
+    const SDL_GPUColorTargetDescription color_target{
+        .format = SDL_GetGPUSwapchainTextureFormat(device, window),
+    };
+    const SDL_GPUGraphicsPipelineCreateInfo create_info{
+        .vertex_shader = vertex_shader.get(),
+        .fragment_shader = fragment_shader.get(),
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .target_info =
+            {
+                .color_target_descriptions = &color_target,
+                .num_color_targets = 1,
+            },
+    };
+
+    GraphicsPipeline pipeline{SDL_CreateGPUGraphicsPipeline(device, &create_info),
+                              GraphicsPipelineDeleter{device}};
+
+    if (pipeline == nullptr) {
+        sdl_fail("could not create triangle graphics pipeline");
+    }
+    return pipeline;
 }
 
 class ClaimedGpuWindow {
@@ -71,7 +135,8 @@ class GpuWindow::Impl {
   public:
     Impl()
         : device_(create_gpu_device()), window_(create_window()),
-          claim_(device_.get(), window_.get()) {}
+          claim_(device_.get(), window_.get()),
+          pipeline_(create_graphics_pipeline(device_.get(), window_.get())) {}
 
     void render(Color clear_color) {
         SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(device_.get());
@@ -111,6 +176,8 @@ class GpuWindow::Impl {
             throw std::runtime_error("could not begin GPU render pass: " + error);
         }
 
+        SDL_BindGPUGraphicsPipeline(render_pass, pipeline_.get());
+        SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(render_pass);
 
         if (!SDL_SubmitGPUCommandBuffer(commands)) {
@@ -122,6 +189,7 @@ class GpuWindow::Impl {
     GpuDevice device_;
     Window window_;
     ClaimedGpuWindow claim_;
+    GraphicsPipeline pipeline_;
 };
 
 GpuWindow::GpuWindow() : impl_(std::make_unique<Impl>()) {}
