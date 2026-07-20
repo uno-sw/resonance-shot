@@ -1,23 +1,16 @@
+#include "GpuWindow.hpp"
+#include "SdlRuntime.hpp"
+
 #include <SDL3/SDL.h>
 
+#include <exception>
 #include <iostream>
 
 namespace {
 
-[[noreturn]] void sdl_fail(const std::string &message) {
-    throw std::runtime_error(message + ": " + SDL_GetError());
-}
-
 int run() {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        sdl_fail("could not initialize SDL video");
-    }
-
-    SDL_Window *window = SDL_CreateWindow("Resonance Shot", 1280, 720, 0);
-    if (window == nullptr) {
-        SDL_Quit();
-        sdl_fail("could not create window");
-    }
+    const SdlRuntime sdl;
+    GpuWindow window;
 
     bool running = true;
     while (running) {
@@ -28,10 +21,17 @@ int run() {
                 running = false;
             }
         }
+
+        if (running) {
+            window.render({
+                .red = 0.05F,
+                .green = 0.10F,
+                .blue = 0.20F,
+                .alpha = 1.0F,
+            });
+        }
     }
 
-    SDL_DestroyWindow(window);
-    SDL_Quit();
     return 0;
 }
 
