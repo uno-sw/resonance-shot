@@ -20,13 +20,13 @@ struct alignas(16) CameraUniforms {
 static_assert(sizeof(CameraUniforms) == 64);
 static_assert(alignof(CameraUniforms) == 16);
 
-CameraUniforms create_camera_uniforms() {
+CameraUniforms create_camera_uniforms(float aspect_ratio) {
     constexpr float pi = 3.14159265358979323846F;
     const resonance::math::Matrix4 view = resonance::math::look_at(
-        {.x = 0.0F, .y = 6.0F, .z = 8.0F}, {.x = 0.0F, .y = 0.0F, .z = -4.0F},
+        {.x = 0.0F, .y = 6.0F, .z = 8.0F}, {.x = 0.0F, .y = 1.2F, .z = -4.0F},
         {.x = 0.0F, .y = 1.0F, .z = 0.0F});
     const resonance::math::Matrix4 projection =
-        resonance::math::perspective(pi / 3.0F, 16.0F / 9.0F, 0.1F, 100.0F);
+        resonance::math::perspective(pi / 3.0F, aspect_ratio, 0.1F, 100.0F);
     return {.view_projection = resonance::math::multiply(projection, view).elements};
 }
 
@@ -64,6 +64,19 @@ struct GraphicsPipelineDeleter {
 
 using GraphicsPipeline = std::unique_ptr<SDL_GPUGraphicsPipeline, GraphicsPipelineDeleter>;
 
+struct TextureDeleter {
+    SDL_GPUDevice *device;
+
+    void operator()(SDL_GPUTexture *texture) const noexcept {
+        SDL_ReleaseGPUTexture(device, texture);
+    }
+};
+
+using GpuTexture = std::unique_ptr<SDL_GPUTexture, TextureDeleter>;
+
+constexpr SDL_GPUTextureFormat depth_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+constexpr std::uint32_t capsule_vertex_count = 9U * 24U * 6U;
+
 GpuDevice create_gpu_device() {
     GpuDevice device{SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, true, "metal")};
     if (device == nullptr) {
@@ -100,10 +113,12 @@ GpuShader create_shader(SDL_GPUDevice *device, SDL_GPUShaderStage stage, const c
     return shader;
 }
 
-GraphicsPipeline create_graphics_pipeline(SDL_GPUDevice *device, SDL_Window *window) {
-    GpuShader vertex_shader = create_shader(device, SDL_GPU_SHADERSTAGE_VERTEX, "floor_vertex");
+GraphicsPipeline create_graphics_pipeline(SDL_GPUDevice *device, SDL_Window *window,
+                                          const char *vertex_entrypoint,
+                                          const char *fragment_entrypoint) {
+    GpuShader vertex_shader = create_shader(device, SDL_GPU_SHADERSTAGE_VERTEX, vertex_entrypoint);
     GpuShader fragment_shader =
-        create_shader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, "floor_fragment");
+        create_shader(device, SDL_GPU_SHADERSTAGE_FRAGMENT, fragment_entrypoint);
 
     const SDL_GPUColorTargetDescription color_target{
         .format = SDL_GetGPUSwapchainTextureFormat(device, window),
@@ -112,10 +127,18 @@ GraphicsPipeline create_graphics_pipeline(SDL_GPUDevice *device, SDL_Window *win
         .vertex_shader = vertex_shader.get(),
         .fragment_shader = fragment_shader.get(),
         .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .depth_stencil_state =
+            {
+                .compare_op = SDL_GPU_COMPAREOP_LESS,
+                .enable_depth_test = true,
+                .enable_depth_write = true,
+            },
         .target_info =
             {
                 .color_target_descriptions = &color_target,
                 .num_color_targets = 1,
+                .depth_stencil_format = depth_format,
+                .has_depth_stencil_target = true,
             },
     };
 
@@ -123,7 +146,7 @@ GraphicsPipeline create_graphics_pipeline(SDL_GPUDevice *device, SDL_Window *win
                               GraphicsPipelineDeleter{device}};
 
     if (pipeline == nullptr) {
-        sdl_fail("could not create floor graphics pipeline");
+        sdl_fail(std::string("could not create ") + vertex_entrypoint + " graphics pipeline");
     }
     return pipeline;
 }
@@ -156,8 +179,17 @@ class GpuWindow::Impl {
     Impl()
         : device_(create_gpu_device()), window_(create_window()),
           claim_(device_.get(), window_.get()),
-          pipeline_(create_graphics_pipeline(device_.get(), window_.get())),
-          camera_uniforms_(create_camera_uniforms()) {}
+          floor_pipeline_(create_graphics_pipeline(device_.get(), window_.get(), "floor_vertex",
+                                                   "floor_fragment")),
+          capsule_pipeline_(create_graphics_pipeline(device_.get(), window_.get(), "capsule_vertex",
+                                                     "capsule_fragment")),
+          depth_texture_(nullptr, TextureDeleter{device_.get()}),
+          camera_uniforms_(create_camera_uniforms(16.0F / 9.0F)) {
+        if (!SDL_GPUTextureSupportsFormat(device_.get(), depth_format, SDL_GPU_TEXTURETYPE_2D,
+                                          SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
+            throw std::runtime_error("Metal GPU does not support the required D32 depth format");
+        }
+    }
 
     void render(Color clear_color) {
         SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(device_.get());
@@ -166,8 +198,10 @@ class GpuWindow::Impl {
         }
 
         SDL_GPUTexture *swapchain_texture = nullptr;
+        std::uint32_t swapchain_width = 0;
+        std::uint32_t swapchain_height = 0;
         if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, window_.get(), &swapchain_texture,
-                                                   nullptr, nullptr)) {
+                                                   &swapchain_width, &swapchain_height)) {
             const std::string error = SDL_GetError();
             SDL_CancelGPUCommandBuffer(commands);
             throw std::runtime_error("could not acquire GPU swapchain texture: " + error);
@@ -177,6 +211,8 @@ class GpuWindow::Impl {
             SDL_CancelGPUCommandBuffer(commands);
             return;
         }
+
+        ensure_depth_texture(swapchain_width, swapchain_height);
 
         SDL_PushGPUVertexUniformData(commands, 0, &camera_uniforms_, sizeof(camera_uniforms_));
 
@@ -191,16 +227,26 @@ class GpuWindow::Impl {
         color_target.load_op = SDL_GPU_LOADOP_CLEAR;
         color_target.store_op = SDL_GPU_STOREOP_STORE;
 
+        SDL_GPUDepthStencilTargetInfo depth_target{};
+        depth_target.texture = depth_texture_.get();
+        depth_target.clear_depth = 1.0F;
+        depth_target.load_op = SDL_GPU_LOADOP_CLEAR;
+        depth_target.store_op = SDL_GPU_STOREOP_DONT_CARE;
+        depth_target.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+        depth_target.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+
         SDL_GPURenderPass *render_pass =
-            SDL_BeginGPURenderPass(commands, &color_target, 1, nullptr);
+            SDL_BeginGPURenderPass(commands, &color_target, 1, &depth_target);
         if (render_pass == nullptr) {
             const std::string error = SDL_GetError();
             SDL_SubmitGPUCommandBuffer(commands);
             throw std::runtime_error("could not begin GPU render pass: " + error);
         }
 
-        SDL_BindGPUGraphicsPipeline(render_pass, pipeline_.get());
+        SDL_BindGPUGraphicsPipeline(render_pass, floor_pipeline_.get());
         SDL_DrawGPUPrimitives(render_pass, 6, 1, 0, 0);
+        SDL_BindGPUGraphicsPipeline(render_pass, capsule_pipeline_.get());
+        SDL_DrawGPUPrimitives(render_pass, capsule_vertex_count, 1, 0, 0);
         SDL_EndGPURenderPass(render_pass);
 
         if (!SDL_SubmitGPUCommandBuffer(commands)) {
@@ -209,10 +255,42 @@ class GpuWindow::Impl {
     }
 
   private:
+    void ensure_depth_texture(std::uint32_t width, std::uint32_t height) {
+        if (depth_texture_ != nullptr && width == depth_width_ && height == depth_height_) {
+            return;
+        }
+
+        const SDL_GPUTextureCreateInfo create_info{
+            .type = SDL_GPU_TEXTURETYPE_2D,
+            .format = depth_format,
+            .usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+            .width = width,
+            .height = height,
+            .layer_count_or_depth = 1,
+            .num_levels = 1,
+            .sample_count = SDL_GPU_SAMPLECOUNT_1,
+        };
+        GpuTexture texture{SDL_CreateGPUTexture(device_.get(), &create_info),
+                           TextureDeleter{device_.get()}};
+        if (texture == nullptr) {
+            sdl_fail("could not create depth texture");
+        }
+
+        depth_texture_ = std::move(texture);
+        depth_width_ = width;
+        depth_height_ = height;
+        camera_uniforms_ =
+            create_camera_uniforms(static_cast<float>(width) / static_cast<float>(height));
+    }
+
     GpuDevice device_;
     Window window_;
     ClaimedGpuWindow claim_;
-    GraphicsPipeline pipeline_;
+    GraphicsPipeline floor_pipeline_;
+    GraphicsPipeline capsule_pipeline_;
+    GpuTexture depth_texture_;
+    std::uint32_t depth_width_ = 0;
+    std::uint32_t depth_height_ = 0;
     CameraUniforms camera_uniforms_;
 };
 
