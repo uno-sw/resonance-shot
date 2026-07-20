@@ -1,0 +1,69 @@
+#!/bin/zsh
+set -euo pipefail
+
+repo_dir="${0:A:h:h}"
+mode="write"
+
+if (( $# > 1 )); then
+  print -u2 "usage: ./scripts/format [--check]"
+  exit 2
+fi
+if (( $# == 1 )); then
+  if [[ "$1" != "--check" ]]; then
+    print -u2 "error: unknown argument: $1"
+    exit 2
+  fi
+  mode="check"
+fi
+
+if ! command -v clang-format >/dev/null 2>&1; then
+  print -u2 "error: clang-format is unavailable; run this task with 'mise run format'"
+  exit 1
+fi
+
+if ! command -v cmake-format >/dev/null 2>&1; then
+  print -u2 "error: cmake-format is unavailable; run this task with 'mise run format'"
+  exit 1
+fi
+
+typeset -a clang_roots clang_files cmake_files
+for directory in "${repo_dir}/Source" "${repo_dir}/Shaders"; do
+  if [[ -d "${directory}" ]]; then
+    clang_roots+=("${directory}")
+  fi
+done
+if (( ${#clang_roots[@]} > 0 )); then
+  while IFS= read -r file; do
+    clang_files+=("${file}")
+  done < <(find "${clang_roots[@]}" -type f \
+    \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
+    -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' \
+    -o -name '*.metal' \) | sort)
+fi
+
+if [[ -f "${repo_dir}/CMakeLists.txt" ]]; then
+  cmake_files+=("${repo_dir}/CMakeLists.txt")
+fi
+if [[ -d "${repo_dir}/cmake" ]]; then
+  while IFS= read -r file; do
+    cmake_files+=("${file}")
+  done < <(find "${repo_dir}/cmake" -type f -name '*.cmake' | sort)
+fi
+
+if [[ "${mode}" == "check" ]]; then
+  if (( ${#clang_files[@]} > 0 )); then
+    clang-format --dry-run --Werror "${clang_files[@]}"
+  fi
+  if (( ${#cmake_files[@]} > 0 )); then
+    cmake-format --check "${cmake_files[@]}"
+  fi
+  print "format check passed"
+else
+  if (( ${#clang_files[@]} > 0 )); then
+    clang-format -i "${clang_files[@]}"
+  fi
+  if (( ${#cmake_files[@]} > 0 )); then
+    cmake-format -i "${cmake_files[@]}"
+  fi
+  print "formatting complete"
+fi
