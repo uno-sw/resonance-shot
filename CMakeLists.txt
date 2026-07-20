@@ -44,10 +44,14 @@ target_compile_options(resonance_shot PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 include(CTest)
 if(BUILD_TESTING)
+  FetchContent_MakeAvailable(Catch2)
+  list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+  include(Catch)
+
   add_executable(resonance_math_tests Tests/MathTests.cpp)
-  target_link_libraries(resonance_math_tests PRIVATE resonance_math)
+  target_link_libraries(resonance_math_tests PRIVATE resonance_math Catch2::Catch2WithMain)
   target_compile_options(resonance_math_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
-  add_test(NAME resonance_math_tests COMMAND resonance_math_tests)
+  catch_discover_tests(resonance_math_tests)
 
   find_program(XCRUN_EXECUTABLE xcrun REQUIRED)
   add_test(
